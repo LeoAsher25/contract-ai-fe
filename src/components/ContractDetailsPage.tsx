@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { SuperDoc } from "@harbour-enterprises/superdoc";
 import "@harbour-enterprises/superdoc/style.css";
+import PdfViewer, { PdfViewerRef } from "./PdfViewer";
 
 interface ContractData {
   id: string;
@@ -31,6 +32,7 @@ const ContractDetailsPage: React.FC = () => {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const superdocRef = useRef<SuperDoc | null>(null);
+  const pdfViewerRef = useRef<PdfViewerRef | null>(null);
 
   const [contractData, setContractData] = useState<ContractData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,19 +105,23 @@ const ContractDetailsPage: React.FC = () => {
   }, [id]);
 
   useEffect(() => {
-    if (!containerRef.current || !contractData) return;
+    if (
+      !containerRef.current ||
+      !contractData ||
+      contractData.fileType === "pdf"
+    )
+      return;
 
-    const isPdf = contractData.fileType === "pdf";
     const containerElement = containerRef.current; // Store ref value to avoid ESLint warning
 
     const sdoc = new SuperDoc({
       selector: containerElement as any,
       document: {
-        type: isPdf ? "pdf" : "docx",
+        type: "docx",
         url: contractData.fileUrl,
       },
-      format: isPdf ? "pdf" : "docx",
-      documentMode: isPdf ? "viewing" : "editing",
+      format: "docx",
+      documentMode: "editing",
       user: { name: "demo", email: "demo@local" },
       documents: [],
       pagination: true,
@@ -127,9 +133,6 @@ const ContractDetailsPage: React.FC = () => {
       },
       onContentError: () => {
         console.log("Content error occurred");
-      },
-      onPdfDocumentReady: () => {
-        console.log("PDF document is ready");
       },
     });
 
@@ -152,86 +155,101 @@ const ContractDetailsPage: React.FC = () => {
   };
 
   const handleMaskPrices = async () => {
-    const sdoc = superdocRef.current;
-    if (!sdoc || !contractData) return;
-
-    const editor = sdoc.activeEditor;
-    if (!editor) return;
+    if (!contractData) return;
 
     setIsMasking(true);
 
     try {
-      const prices = parsePrices();
-      console.log("Masking prices:", prices);
+      if (contractData.fileType === "pdf") {
+        // Use PDF viewer for masking
+        if (pdfViewerRef.current) {
+          await pdfViewerRef.current.maskPrices();
+        }
+      } else {
+        // Use SuperDoc for DOCX masking
+        const sdoc = superdocRef.current;
+        if (!sdoc) return;
 
-      // Find all matches for each price string
-      const allMatches: SearchResult[] = prices.flatMap((price) => {
-        const results = sdoc.search(price) as SearchResult[];
-        console.log(`Found ${results?.length || 0} matches for "${price}"`);
-        return results || [];
-      });
+        const editor = sdoc.activeEditor;
+        if (!editor) return;
 
-      if (allMatches.length === 0) {
-        console.log("No matches found to mask");
-        alert("Không tìm thấy giá trị nào để che");
-        return;
-      }
+        const prices = parsePrices();
+        console.log("Masking prices:", prices);
 
-      // Remove duplicates and sort by position (descending to avoid index shifting)
-      const uniq = new Map<string, SearchResult>();
-      for (const match of allMatches) {
-        uniq.set(`${match.from}-${match.to}`, match);
-      }
-      const matches = Array.from(uniq.values()).sort((a, b) => b.from - a.from);
+        // Find all matches for each price string
+        const allMatches: SearchResult[] = prices.flatMap((price) => {
+          const results = sdoc.search(price) as SearchResult[];
+          console.log(`Found ${results?.length || 0} matches for "${price}"`);
+          return results || [];
+        });
 
-      console.log(`Masking: ${matches.length} unique matches`);
-
-      // Process matches one by one
-      let processedCount = 0;
-      const processNextMatch = () => {
-        if (processedCount >= matches.length) {
-          console.log("All matches processed!");
-          setIsMasked(true);
-          setIsMasking(false);
+        if (allMatches.length === 0) {
+          console.log("No matches found to mask");
+          alert("Không tìm thấy giá trị nào để che");
           return;
         }
 
-        const match = matches[processedCount];
-        console.log(
-          `Processing match ${processedCount + 1}/${matches.length}:`,
-          match
+        // Remove duplicates and sort by position (descending to avoid index shifting)
+        const uniq = new Map<string, SearchResult>();
+        for (const match of allMatches) {
+          uniq.set(`${match.from}-${match.to}`, match);
+        }
+        const matches = Array.from(uniq.values()).sort(
+          (a, b) => b.from - a.from
         );
 
-        try {
-          sdoc.goToSearchResult(match);
+        console.log(`Masking: ${matches.length} unique matches`);
 
-          if (
-            editor.commands &&
-            editor.commands.deleteSelection &&
-            editor.commands.insertContent
-          ) {
-            editor.commands.deleteSelection();
-            editor.commands.insertContent(maskText);
-            console.log(
-              `✓ Masked match ${processedCount + 1} with "${maskText}"`
-            );
-          } else if (editor.commands && editor.commands.insertContent) {
-            editor.commands.insertContent(maskText);
-            console.log(
-              `✓ Inserted "${maskText}" for match ${processedCount + 1}`
-            );
+        // Process matches one by one
+        let processedCount = 0;
+        const processNextMatch = () => {
+          if (processedCount >= matches.length) {
+            console.log("All matches processed!");
+            setIsMasked(true);
+            setIsMasking(false);
+            return;
           }
 
-          processedCount++;
-          setTimeout(processNextMatch, 200);
-        } catch (error) {
-          console.error(`Error processing match ${processedCount + 1}:`, error);
-          processedCount++;
-          setTimeout(processNextMatch, 200);
-        }
-      };
+          const match = matches[processedCount];
+          console.log(
+            `Processing match ${processedCount + 1}/${matches.length}:`,
+            match
+          );
 
-      processNextMatch();
+          try {
+            sdoc.goToSearchResult(match);
+
+            if (
+              editor.commands &&
+              editor.commands.deleteSelection &&
+              editor.commands.insertContent
+            ) {
+              editor.commands.deleteSelection();
+              editor.commands.insertContent(maskText);
+              console.log(
+                `✓ Masked match ${processedCount + 1} with "${maskText}"`
+              );
+            } else if (editor.commands && editor.commands.insertContent) {
+              editor.commands.insertContent(maskText);
+              console.log(
+                `✓ Inserted "${maskText}" for match ${processedCount + 1}`
+              );
+            }
+
+            processedCount++;
+            setTimeout(processNextMatch, 200);
+          } catch (error) {
+            console.error(
+              `Error processing match ${processedCount + 1}:`,
+              error
+            );
+            processedCount++;
+            setTimeout(processNextMatch, 200);
+          }
+        };
+
+        processNextMatch();
+      }
     } catch (error) {
       console.error("Error masking prices:", error);
       setIsMasking(false);
@@ -244,16 +262,53 @@ const ContractDetailsPage: React.FC = () => {
     setIsExporting(true);
 
     try {
-      await mockExportAPI(contractData.id, isMasked);
-      alert(
-        `Đã export file ${isMasked ? "sau khi che giá" : "gốc"} thành công!`
-      );
+      if (contractData.fileType === "pdf" && pdfViewerRef.current) {
+        // Export PDF using pdf-lib
+        await pdfViewerRef.current.exportPdf();
+      } else {
+        // Export DOCX using mock API
+        await mockExportAPI(contractData.id, isMasked);
+        alert(
+          `Đã export file ${isMasked ? "sau khi che giá" : "gốc"} thành công!`
+        );
+      }
     } catch (error) {
       console.error("Export failed:", error);
       alert("Có lỗi xảy ra khi export file");
     } finally {
       setIsExporting(false);
     }
+  };
+
+  // PDF masking callbacks
+  const handlePdfMaskComplete = (success: boolean) => {
+    setIsMasking(false);
+    if (success) {
+      setIsMasked(true);
+      console.log("PDF masking completed successfully");
+    } else {
+      console.log("PDF masking failed or no matches found");
+      alert("Không tìm thấy giá trị nào để che hoặc có lỗi xảy ra");
+    }
+  };
+
+  const handlePdfExport = (pdfBytes: Uint8Array) => {
+    // Create download link
+    const blob = new Blob([pdfBytes as BlobPart], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${contractData?.fileName || "contract"}_${
+      isMasked ? "masked" : "original"
+    }.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    alert(
+      `Đã export file PDF ${isMasked ? "sau khi che giá" : "gốc"} thành công!`
+    );
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -291,8 +346,7 @@ const ContractDetailsPage: React.FC = () => {
           </div>
           <button
             onClick={() => navigate("/")}
-            className="px-5 py-2 bg-indigo-500 text-white border-none rounded-lg cursor-pointer text-base hover:bg-indigo-600 transition-colors"
-          >
+            className="px-5 py-2 bg-indigo-500 text-white border-none rounded-lg cursor-pointer text-base hover:bg-indigo-600 transition-colors">
             Quay lại trang chủ
           </button>
         </div>
@@ -321,20 +375,18 @@ const ContractDetailsPage: React.FC = () => {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => navigate("/")}
-              className="px-5 py-2 bg-gray-500 text-white border-none rounded-lg cursor-pointer text-sm hover:bg-gray-600 transition-colors"
-            >
+              className="px-5 py-2 bg-gray-500 text-white border-none rounded-lg cursor-pointer text-sm hover:bg-gray-600 transition-colors">
               ← Quay lại
             </button>
 
             <button
               onClick={handleMaskPrices}
-              disabled={isMasking || contractData.fileType === "pdf"}
+              disabled={isMasking}
               className={`px-5 py-2 border-none rounded-lg text-sm font-bold transition-colors ${
-                isMasking || contractData.fileType === "pdf"
+                isMasking
                   ? "bg-gray-300 text-gray-500 cursor-not-allowed"
                   : "bg-yellow-400 text-black cursor-pointer hover:bg-yellow-500"
-              }`}
-            >
+              }`}>
               {isMasking ? "⏳ Đang che..." : "🔒 Che giá"}
             </button>
 
@@ -345,8 +397,7 @@ const ContractDetailsPage: React.FC = () => {
                 isExporting
                   ? "bg-gray-300 text-white cursor-not-allowed"
                   : "bg-green-500 text-white cursor-pointer hover:bg-green-600"
-              }`}
-            >
+              }`}>
               {isExporting ? "⏳ Đang export..." : "📥 Export"}
             </button>
           </div>
@@ -393,10 +444,21 @@ const ContractDetailsPage: React.FC = () => {
 
         {/* Document Viewer */}
         <div className="bg-white rounded-2xl p-5 shadow-lg overflow-hidden">
-          <div
-            ref={containerRef}
-            className="h-[800px] overflow-auto border border-gray-200 rounded-lg w-full p-4"
-          />
+          {contractData.fileType === "pdf" ? (
+            <PdfViewer
+              ref={pdfViewerRef}
+              fileUrl={contractData.fileUrl}
+              maskText={maskText}
+              pricesToMask={parsePrices()}
+              onMaskComplete={handlePdfMaskComplete}
+              onExport={handlePdfExport}
+            />
+          ) : (
+            <div
+              ref={containerRef}
+              className="h-[800px] overflow-auto border border-gray-200 rounded-lg w-full p-4"
+            />
+          )}
         </div>
       </div>
     </div>

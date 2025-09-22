@@ -5,10 +5,12 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 
 // 1) Worker PDF.js (sử dụng CDN với version có sẵn)
 // pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
-  import.meta.url
-).toString();
+// pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+//   "pdfjs-dist/build/pdf.worker.min.mjs",
+//   import.meta.url
+// ).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
+
 /**
  * Component hiển thị PDF và che/mask các chuỗi giá ngay trên text layer
  * - fileUrl: URL tới PDF (vd: "/contract.pdf" trong public/)
@@ -184,8 +186,7 @@ export default function PdfPriceMasker({ fileUrl }: { fileUrl: string }) {
           maxWidth: 780,
           gridTemplateColumns: "1fr",
           marginBottom: 12,
-        }}
-      >
+        }}>
         <label>
           PDF URL:
           <input
@@ -244,8 +245,7 @@ export default function PdfPriceMasker({ fileUrl }: { fileUrl: string }) {
           marginInline: "auto",
           maxHeight: 780,
           overflow: "auto",
-        }}
-      >
+        }}>
         <Document
           file={fileUrl}
           onLoadSuccess={(info) => {
@@ -257,8 +257,7 @@ export default function PdfPriceMasker({ fileUrl }: { fileUrl: string }) {
             console.error("PDF load error:", err);
             alert("Không load được PDF. Kiểm tra đường dẫn/CORS/MIME.");
           }}
-          loading={<div style={{ padding: 24 }}>Loading PDF…</div>}
-        >
+          loading={<div style={{ padding: 24 }}>Loading PDF…</div>}>
           {Array.from(new Array(numPages), (_, idx) => (
             <Page
               key={`p_${idx + 1}`}
